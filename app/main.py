@@ -1,13 +1,39 @@
-from fastapi import FastAPI, Depends, HTTPException
-from contextlib import asynccontextmanager
-
+from fastapi import HTTPException, Depends
+from fastapi import FastAPI
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.models import Note, Tag
 from app.schema import NoteCreate
+from app.models import User
+from auth import endpoints as auth_endpoints
+from contextlib import asynccontextmanager
+from fastapi.security import OAuth2PasswordBearer
+from jose import jwt, JWTError
 
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+async def get_current_user(db: AsyncSession = Depends(get_db), token: str = Depends(oauth2_scheme)):
+    credentials_exception = HTTPException(
+        status_code=401,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, "SECRET_KEY", algorithms=["HS256"])
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+
+    result = await db.execute(select(User).filter(User.username == username))
+    user = result.scalars().first()
+
+    if user is None:
+        raise credentials_exception
+    return user
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -16,18 +42,17 @@ async def lifespan(app: FastAPI):
     print("Shutting down...")
 
 app = FastAPI(lifespan=lifespan)
+app.include_router(auth_endpoints.router, prefix="/auth")
 
 @app.get("/notes")
 async def get_notes(db: AsyncSession = Depends(get_db)):
-    async with db.begin():
-        result = await db.execute(select(Note))
-        notes = result.scalars().all()
+    result = await db.execute(select(Note))
+    notes = result.scalars().all()
     return notes
 
-
 @app.get("/notes/{note_id}")
-async def get_note(note_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Note).where(Note.id == note_id))
+async def get_note(note_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    result = await db.execute(select(Note).where(Note.id == note_id, Note.owner_id == current_user.id))
     note = result.scalars().first()
 
     if not note:
@@ -36,13 +61,13 @@ async def get_note(note_id: int, db: AsyncSession = Depends(get_db)):
     return note
 
 @app.post("/notes")
-async def create_note(note: NoteCreate, db: AsyncSession = Depends(get_db)):
+async def create_note(note: NoteCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
     new_note = Note(
         title=note.title,
         content=note.content,
+        owner_id=current_user.id,
     )
     db.add(new_note)
-
     await db.commit()
     await db.refresh(new_note)
 
@@ -68,13 +93,9 @@ async def create_note(note: NoteCreate, db: AsyncSession = Depends(get_db)):
 
     return {"message": "Note created successfully", "note": new_note}
 
-
-from fastapi import HTTPException
-
-
 @app.put("/notes/{note_id}")
-async def update_note(note_id: int, note: NoteCreate, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Note).where(Note.id == note_id))
+async def update_note(note_id: int, note: NoteCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    result = await db.execute(select(Note).where(Note.id == note_id, Note.owner_id == current_user.id))
     existing_note = result.scalars().first()
 
     if not existing_note:
@@ -109,8 +130,8 @@ async def update_note(note_id: int, note: NoteCreate, db: AsyncSession = Depends
     return {"message": "Note updated successfully", "note": existing_note}
 
 @app.delete("/notes/{note_id}")
-async def delete_note(note_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Note).filter(Note.id == note_id))
+async def delete_note(note_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    result = await db.execute(select(Note).filter(Note.id == note_id, Note.owner_id == current_user.id))
     note = result.scalars().first()
 
     if note is None:
