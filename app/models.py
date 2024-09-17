@@ -1,27 +1,29 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey
+from datetime import datetime
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Table
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
 from sqlalchemy.ext.declarative import declarative_base
 
 Base = declarative_base()
 
+association_table = Table(
+    'note_tag', Base.metadata,
+    Column('note_id', ForeignKey('notes.id')),
+    Column('tag_id', ForeignKey('tags.id'))
+)
+
 class Note(Base):
     __tablename__ = 'notes'
-
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String, index=True)
     content = Column(Text)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(DateTime, default=lambda: datetime.now(), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(), onupdate=lambda: datetime.now(), nullable=False)
 
-    tags = relationship('Tag', back_populates='note', cascade="all, delete-orphan")
+    tags = relationship('Tag', secondary=association_table, back_populates='notes')
 
 class Tag(Base):
     __tablename__ = 'tags'
-
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)
-    note_id = Column(Integer, ForeignKey('notes.id'))
+    name = Column(String, index=True, unique=True)
 
-    note = relationship('Note', back_populates='tags')
-
+    notes = relationship('Note', secondary=association_table, back_populates='tags')

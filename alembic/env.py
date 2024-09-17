@@ -1,7 +1,8 @@
 from logging.config import fileConfig
 
 from alembic import context
-from app.db import Base, sync_engine
+from app.models import Base
+from app.db import sync_engine
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -25,7 +26,7 @@ def run_migrations_offline():
 
 def run_migrations_online():
     """Run migrations in 'online' mode."""
-    connectable = sync_engine
+    connectable = sync_engine  # Используем синхронный движок для подключения
 
     with connectable.connect() as connection:
         context.configure(
