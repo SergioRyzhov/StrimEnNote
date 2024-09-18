@@ -2,6 +2,7 @@ from fastapi import HTTPException, Depends
 from fastapi import FastAPI
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import get_db
 from app.models import Note, Tag
@@ -11,8 +12,27 @@ from auth import endpoints as auth_endpoints
 from contextlib import asynccontextmanager
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
+from bot.main import bot
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("Starting up...")
+    yield
+    print("Shutting down...")
+
+app = FastAPI(lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(auth_endpoints.router, prefix="/auth")
 
 async def get_current_user(db: AsyncSession = Depends(get_db), token: str = Depends(oauth2_scheme)):
     credentials_exception = HTTPException(
@@ -34,15 +54,6 @@ async def get_current_user(db: AsyncSession = Depends(get_db), token: str = Depe
     if user is None:
         raise credentials_exception
     return user
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    print("Starting up...")
-    yield
-    print("Shutting down...")
-
-app = FastAPI(lifespan=lifespan)
-app.include_router(auth_endpoints.router, prefix="/auth")
 
 @app.get("/notes")
 async def get_notes(db: AsyncSession = Depends(get_db)):
@@ -141,3 +152,6 @@ async def delete_note(note_id: int, db: AsyncSession = Depends(get_db), current_
     await db.commit()
 
     return {"message": "Note deleted successfully"}
+
+if __name__ == "__main__":
+    bot.run()
